@@ -6,13 +6,13 @@
 import os
 
 # Основной токен бота продаж (@bonzayka_defense_bot)
-BOT_TOKEN = os.environ.get("SALES_BOT_TOKEN", "8962924817:AAE9zL6SWst2Jn8Yw3QAi1qqv_k4V47GYFo")
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("SALES_BOT_TOKEN") or "8962924817:AAE9zL6SWst2Jn8Yw3QAi1qqv_k4V47GYFo"
 
 # Логин поддержки для клиентов
 SUPPORT_USERNAME = "Bonzayka"
 
 # ID администраторов с доступом к панели управления и ручной выдаче подписок
-ADMIN_IDS = [
+ADMIN_IDS = [7116116919] + [
     int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()
 ]
 
