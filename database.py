@@ -3,13 +3,29 @@
 База данных SQLite для бота продаж и подписок.
 """
 
+import os
 import sqlite3
 from datetime import datetime, timedelta
-import config
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "sales.db")
+ADMIN_IDS = [7116116919, 1107097183]
+OWNER_ID = 7116116919
+
+try:
+    import config
+    if hasattr(config, "DB_FILE"):
+        DB_FILE = config.DB_FILE
+    if hasattr(config, "ADMIN_IDS"):
+        ADMIN_IDS = config.ADMIN_IDS
+    if hasattr(config, "OWNER_ID"):
+        OWNER_ID = config.OWNER_ID
+except Exception:
+    pass
 
 
 def _conn() -> sqlite3.Connection:
-    c = sqlite3.connect(config.DB_FILE)
+    c = sqlite3.connect(DB_FILE)
     c.row_factory = sqlite3.Row
     return c
 
@@ -78,7 +94,7 @@ def upsert_user(user_id: int, username: str = "", first_name: str = "") -> None:
 
 
 def is_admin(user_id: int) -> bool:
-    if user_id in config.ADMIN_IDS or user_id == config.OWNER_ID:
+    if user_id in ADMIN_IDS or user_id == OWNER_ID:
         return True
     with _conn() as db:
         cur = db.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
@@ -206,3 +222,138 @@ def get_stats() -> dict:
             "total_rub": orders_paid[1],
             "active_subs": active_subs
         }
+
+
+def get_subscription(sub_id: int) -> dict | None:
+    with _conn() as db:
+        cur = db.execute("""
+            SELECT s.*, u.username as user_username, u.first_name as user_first_name
+            FROM subscriptions s
+            LEFT JOIN users u ON s.user_id = u.user_id
+            WHERE s.id = ?
+        """, (sub_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_subscriptions(limit: int = 50, offset: int = 0) -> list[dict]:
+    with _conn() as db:
+        cur = db.execute("""
+            SELECT s.*, u.username as user_username, u.first_name as user_first_name
+            FROM subscriptions s
+            LEFT JOIN users u ON s.user_id = u.user_id
+            ORDER BY s.id DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def count_subscriptions() -> int:
+    with _conn() as db:
+        return db.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]
+
+
+def find_user_subs(query: str | int) -> list[dict]:
+    """Поиск подписок по user_id или @username."""
+    with _conn() as db:
+        if str(query).isdigit():
+            cur = db.execute("""
+                SELECT s.*, u.username as user_username, u.first_name as user_first_name
+                FROM subscriptions s
+                LEFT JOIN users u ON s.user_id = u.user_id
+                WHERE s.user_id = ? OR s.id = ?
+                ORDER BY s.id DESC
+            """, (int(query), int(query)))
+        else:
+            clean_q = str(query).lstrip("@").strip().lower()
+            cur = db.execute("""
+                SELECT s.*, u.username as user_username, u.first_name as user_first_name
+                FROM subscriptions s
+                LEFT JOIN users u ON s.user_id = u.user_id
+                WHERE LOWER(u.username) LIKE ? OR LOWER(s.bot_username) LIKE ?
+                ORDER BY s.id DESC
+            """, (f"%{clean_q}%", f"%{clean_q}%"))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def extend_sub_days(sub_id: int, days: int) -> dict | None:
+    now = datetime.now()
+    with _conn() as db:
+        cur = db.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        cur_end = datetime.fromisoformat(row["end_date"])
+        if days > 0:
+            start_point = cur_end if cur_end > now else now
+            new_end = start_point + timedelta(days=days)
+        else:
+            new_end = cur_end + timedelta(days=days)
+            if new_end < now:
+                new_end = now
+
+        db.execute("""
+            UPDATE subscriptions
+            SET end_date = ?, is_active = 1
+            WHERE id = ?
+        """, (new_end.isoformat(), sub_id))
+        db.commit()
+        return {
+            "id": sub_id,
+            "user_id": row["user_id"],
+            "plan": row["plan"],
+            "end_date": new_end.strftime("%d.%m.%Y"),
+            "end_iso": new_end.isoformat(),
+            "bot_token": row["bot_token"],
+            "bot_id": row["bot_id"],
+            "bot_username": row["bot_username"]
+        }
+
+
+def set_sub_plan(sub_id: int, new_plan: str) -> dict | None:
+    with _conn() as db:
+        db.execute("UPDATE subscriptions SET plan = ? WHERE id = ?", (new_plan.lower(), sub_id))
+        db.commit()
+    return get_subscription(sub_id)
+
+
+def toggle_sub_active(sub_id: int, is_active: int | None = None) -> bool:
+    with _conn() as db:
+        if is_active is None:
+            cur = db.execute("SELECT is_active FROM subscriptions WHERE id = ?", (sub_id,))
+            row = cur.fetchone()
+            if not row:
+                return False
+            is_active = 0 if row["is_active"] else 1
+        db.execute("UPDATE subscriptions SET is_active = ? WHERE id = ?", (is_active, sub_id))
+        db.commit()
+        return bool(is_active)
+
+
+def unbind_sub_bot(sub_id: int) -> dict | None:
+    with _conn() as db:
+        cur = db.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        db.execute("""
+            UPDATE subscriptions
+            SET bot_id = '', bot_username = '', bot_token = ''
+            WHERE id = ?
+        """, (sub_id,))
+        db.commit()
+        return dict(row)
+
+
+def get_active_sub(user_id: int) -> dict | None:
+    now = datetime.now().isoformat()
+    with _conn() as db:
+        cur = db.execute("""
+            SELECT * FROM subscriptions
+            WHERE user_id = ? AND is_active = 1 AND end_date > ?
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, now))
+        row = cur.fetchone()
+        return dict(row) if row else None
+

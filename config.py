@@ -33,4 +33,6 @@ PAYMENT_PROVIDER_TOKEN = os.environ.get("PAYMENT_PROVIDER_TOKEN", "")
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sales.db")
 
 # Путь к родительскому проекту для авто-создания ботов через manager.py
-PARENT_DIR = r"C:\defense\lavka_defense"
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.environ.get("PARENT_DIR") or os.path.abspath(os.path.join(_CURRENT_DIR, ".."))
+

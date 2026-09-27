@@ -79,7 +79,79 @@ def bot_setup_kb(sub_id: int) -> InlineKeyboardMarkup:
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Управление подписками", callback_data="admin:subs:0")],
+        [
+            InlineKeyboardButton(text="🎁 Выдать подписку", callback_data="admin:give"),
+            InlineKeyboardButton(text="🔍 Поиск подписки", callback_data="admin:search")
+        ],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
-        [InlineKeyboardButton(text="🎁 Выдать подписку", callback_data="admin:give")],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
     ])
+
+
+def admin_subs_list_kb(subs: list[dict], page: int, total_count: int, page_size: int = 6) -> InlineKeyboardMarkup:
+    rows = []
+    for s in subs:
+        is_act = bool(s.get("is_active", 1))
+        badge = "💎" if s.get("plan", "").lower() == "pro" else "🛡️"
+        status_dot = "🟢" if is_act else "🔴"
+        u_label = f"@{s['user_username']}" if s.get("user_username") else f"ID {s['user_id']}"
+        b_label = f"(@{s['bot_username']})" if s.get("bot_username") else "(нет бота)"
+        btn_text = f"{status_dot} {badge} #{s['id']} {u_label} {b_label}"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"admin:sub:{s['id']}")])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:subs:{page-1}"))
+
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    nav_row.append(InlineKeyboardButton(text=f"Стр. {page+1}/{total_pages}", callback_data="admin:noop"))
+
+    if (page + 1) * page_size < total_count:
+        nav_row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin:subs:{page+1}"))
+
+    if nav_row:
+        rows.append(nav_row)
+
+    rows.append([
+        InlineKeyboardButton(text="🔍 Поиск", callback_data="admin:search"),
+        InlineKeyboardButton(text="⬅️ В админку", callback_data="admin:menu")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_sub_card_kb(sub: dict) -> InlineKeyboardMarkup:
+    sub_id = sub["id"]
+    is_act = bool(sub.get("is_active", 1))
+    plan = sub.get("plan", "standard").lower()
+    next_plan = "PRO" if plan == "standard" else "Standard"
+
+    rows = [
+        [
+            InlineKeyboardButton(text="➕ 30 дн.", callback_data=f"admin:sub:add:{sub_id}:30"),
+            InlineKeyboardButton(text="➕ 3 мес.", callback_data=f"admin:sub:add:{sub_id}:90"),
+            InlineKeyboardButton(text="➕ 1 год", callback_data=f"admin:sub:add:{sub_id}:365"),
+        ],
+        [
+            InlineKeyboardButton(text="➖ 30 дн.", callback_data=f"admin:sub:sub:{sub_id}:30"),
+            InlineKeyboardButton(text="✏️ Задать дни вручную", callback_data=f"admin:sub:custom:{sub_id}"),
+        ],
+        [
+            InlineKeyboardButton(text=f"🔄 Сменить тариф на {next_plan}", callback_data=f"admin:sub:plan:{sub_id}"),
+        ],
+        [
+            InlineKeyboardButton(
+                text="⛔ Отозвать подписку" if is_act else "🟢 Активировать подписку",
+                callback_data=f"admin:sub:toggle:{sub_id}"
+            )
+        ]
+    ]
+
+    if sub.get("bot_username") or sub.get("bot_token"):
+        rows.append([
+            InlineKeyboardButton(text="🗑 Отвязать токен бота", callback_data=f"admin:sub:unbind:{sub_id}")
+        ])
+
+    rows.append([InlineKeyboardButton(text="⬅️ К списку подписок", callback_data="admin:subs:0")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+

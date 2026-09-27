@@ -7,6 +7,7 @@ import os
 import sys
 import re
 import secrets
+from datetime import datetime
 from html import escape as esc
 
 from aiogram import Router, F, Bot
@@ -37,6 +38,9 @@ router = Router()
 
 class UserStates(StatesGroup):
     waiting_for_token = State()
+    waiting_for_new_token = State()
+    waiting_for_custom_days = State()
+    waiting_for_search_query = State()
     waiting_for_broadcast = State()
 
 
@@ -214,6 +218,32 @@ async def process_successful_payment(message: Message, state: FSMContext):
     else:
         sub_info = db.add_or_extend_sub(message.from_user.id, "standard", 1)
 
+    # Если бот уже был привязан к подписке — сразу обновляем его в manager!
+    if sub_info.get("bot_username"):
+        s_full = db.get_subscription(sub_info["id"])
+        if s_full and s_full.get("bot_token") and manager:
+            manager.spawn({
+                "id": manager.bot_id(s_full["bot_token"]),
+                "token": s_full["bot_token"],
+                "username": s_full.get("bot_username", ""),
+                "owner": message.from_user.id,
+                "plan": sub_info["plan"],
+                "end_date": sub_info["end_date"]
+            })
+        text = (
+            f"🎉 <b>Оплата прошла успешно! Подписка продлена!</b>\n\n"
+            f"• <b>Тариф:</b> {sub_info['plan'].upper()}\n"
+            f"• <b>Бот:</b> @{sub_info['bot_username']}\n"
+            f"• <b>Действует до:</b> <b>{sub_info['end_date']}</b>\n\n"
+            f"Все функции тарифа автоматически применились к вашему боту."
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 Мои боты и подписка", callback_data="nav:my_subs")],
+            [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
+        ])
+        await message.answer(text, reply_markup=markup)
+        return
+
     text = (
         f"🎉 <b>Оплата прошла успешно!</b>\n\n"
         f"Подписка <b>{sub_info['plan'].upper()}</b> активна до <b>{sub_info['end_date']}</b>.\n\n"
@@ -306,13 +336,24 @@ async def process_bot_token(message: Message, state: FSMContext):
     sub_id = data.get("sub_id")
     await state.clear()
 
+    sub = db.get_subscription(sub_id) if sub_id else None
+    plan = sub.get("plan", "standard") if sub else "standard"
+    end_date = sub.get("end_date", "") if sub else ""
+
     gen_pass = f"def_{secrets.token_hex(4)}"
 
     if manager:
-        ok = manager.add(token, me.username or "", owner=uid, password=gen_pass)
+        ok = manager.add(token, me.username or "", owner=uid, password=gen_pass, plan=plan, end_date=end_date)
         if not ok:
-            manager.spawn({"id": manager.bot_id(token), "token": token, "username": me.username or "",
-                           "owner": uid, "password": gen_pass})
+            manager.spawn({
+                "id": manager.bot_id(token),
+                "token": token,
+                "username": me.username or "",
+                "owner": uid,
+                "password": gen_pass,
+                "plan": plan,
+                "end_date": end_date
+            })
 
     if sub_id:
         db.update_sub_bot(sub_id, str(me.id), me.username or "", token)
@@ -330,9 +371,148 @@ async def process_bot_token(message: Message, state: FSMContext):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить бота в группу", url=add_url)],
         [InlineKeyboardButton(text="🤖 Открыть диалог с ботом", url=f"https://t.me/{me.username}")],
+        [InlineKeyboardButton(text="🤖 Мои боты и подписка", callback_data="nav:my_subs")],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
     ])
     await message.answer(text, reply_markup=markup)
+
+
+# ============================== СМЕНА ТОКЕНА БОТА ==============================
+
+@router.callback_query(F.data.startswith("token:change:"))
+async def cb_token_change(cb: CallbackQuery, state: FSMContext):
+    sub_id = int(cb.data.split(":")[2])
+    uid = cb.from_user.id
+    sub = db.get_subscription(sub_id)
+    if not sub or (sub["user_id"] != uid and not check_is_admin(uid)):
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    await state.set_state(UserStates.waiting_for_new_token)
+    await state.update_data(sub_id=sub_id, old_token=sub.get("bot_token", ""))
+    await cb.answer()
+
+    cur_name = f"@{sub.get('bot_username')}" if sub.get("bot_username") else "не привязан"
+    text = (
+        "🔄 <b>Смена токена бота</b>\n\n"
+        f"Текущий бот: <b>{cur_name}</b>\n\n"
+        "1. Перейдите в @BotFather и создайте нового бота (команда <code>/newbot</code>) "
+        "или скопируйте обновленный токен текущего бота.\n"
+        "2. Пришлите новый токен сюда ответным сообщением.\n\n"
+        "🛡️ <i>Все настройки правил, база данных чатов и стоп-слова перенесутся на новый токен автоматически!</i>"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="nav:my_subs")]
+    ])
+    try:
+        await cb.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await cb.message.answer(text, reply_markup=markup)
+
+
+@router.message(UserStates.waiting_for_new_token)
+async def process_new_bot_token(message: Message, state: FSMContext):
+    token = (message.text or "").strip()
+    if token.startswith("/"):
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=kb.main_menu_kb(check_is_admin(message.from_user.id)))
+        return
+
+    if not re.match(r"^\d{6,}:[\w-]{30,}$", token):
+        await message.answer(
+            "⚠️ Это не похоже на токен бота.\n"
+            "Формат: <code>1234567890:AA...</code>\n\n"
+            "Попробуйте еще раз или напишите /cancel для отмены."
+        )
+        return
+
+    try:
+        temp_bot = Bot(token=token)
+        me = await temp_bot.get_me()
+        await temp_bot.session.close()
+    except Exception as e:
+        await message.answer(
+            f"❌ Токен недействителен (ошибка Telegram API: {esc(str(e))}).\n"
+            "Проверьте правильность копирования в @BotFather."
+        )
+        return
+
+    data = await state.get_data()
+    sub_id = data.get("sub_id")
+    old_token = data.get("old_token", "")
+    await state.clear()
+
+    sub = db.get_subscription(sub_id) if sub_id else None
+    plan = sub.get("plan", "standard") if sub else "standard"
+    end_date = sub.get("end_date", "") if sub else ""
+
+    uid = message.from_user.id
+    if manager:
+        manager.update_token(
+            old_token_or_bid=old_token or token,
+            new_token=token,
+            username=me.username or "",
+            owner=uid,
+            plan=plan,
+            end_date=end_date
+        )
+
+    if sub_id:
+        db.update_sub_bot(sub_id, str(me.id), me.username or "", token)
+
+    add_url = f"https://t.me/{me.username}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
+
+    text = (
+        f"✅ <b>Токен успешно изменен!</b>\n\n"
+        f"Новый бот: <b>@{esc(me.username)}</b>\n"
+        f"Статус: 🟢 Запущен и защищает чаты\n\n"
+        f"Все ваши настройки и правила сохранены.\n"
+        f"Не забудьте добавить нового бота в ваши группы администратором:"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"➕ Добавить @{me.username} в группу", url=add_url)],
+        [InlineKeyboardButton(text="🤖 Мои боты и подписка", callback_data="nav:my_subs")],
+        [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
+    ])
+    await message.answer(text, reply_markup=markup)
+
+
+# ============================== СТАРТ / СТОП БОТА ==============================
+
+@router.callback_query(F.data.startswith("bot:toggle:"))
+async def cb_bot_toggle(cb: CallbackQuery):
+    sub_id = int(cb.data.split(":")[2])
+    uid = cb.from_user.id
+    sub = db.get_subscription(sub_id)
+    if not sub or (sub["user_id"] != uid and not check_is_admin(uid)):
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    bot_token = sub.get("bot_token")
+    if not bot_token or not manager:
+        await cb.answer("Токен бота не найден", show_alert=True)
+        return
+
+    bid = manager.bot_id(bot_token)
+    if manager.is_running(bid):
+        manager.stop(bid)
+        await cb.answer("⏹ Бот остановлен", show_alert=True)
+    else:
+        now_iso = datetime.now().isoformat()
+        if not sub.get("is_active", 1) or sub.get("end_date", "") < now_iso:
+            await cb.answer("❌ Срок подписки истек. Продлите подписку для запуска.", show_alert=True)
+            return
+        manager.spawn({
+            "id": bid,
+            "token": bot_token,
+            "username": sub.get("bot_username", ""),
+            "owner": sub.get("user_id", uid),
+            "plan": sub.get("plan", "standard"),
+            "end_date": sub.get("end_date", "")
+        })
+        await cb.answer("▶️ Бот запущен!", show_alert=True)
+
+    await cb_my_subs(cb)
 
 
 # ============================== КАБИНЕТ: МОИ БОТЫ И ПОДПИСКИ ==============================
@@ -353,24 +533,62 @@ async def cb_my_subs(cb: CallbackQuery):
             [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="nav:plans")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="nav:home")],
         ])
-        await cb.message.edit_text(text, reply_markup=markup)
+        try:
+            await cb.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            await cb.message.answer(text, reply_markup=markup)
         return
 
-    text = "🤖 <b>Ваши активные подписки и боты:</b>\n\n"
+    text = "🤖 <b>Ваши подписки и боты:</b>\n\n"
     rows = []
+    now_iso = datetime.now().isoformat()
     for s in subs:
-        b_name = f"@{s['bot_username']}" if s.get("bot_username") else "⚠️ Токен еще не привязан"
-        text += (
-            f"• <b>Тариф:</b> {s['plan'].upper()}\n"
-            f"  <b>Бот:</b> {b_name}\n"
-            f"  <b>Действует до:</b> {s['end_date']}\n\n"
-        )
-        if not s.get("bot_username"):
-            rows.append([InlineKeyboardButton(text="🤖 Привязать токен бота", callback_data=f"token:bind:{s['id']}")])
+        is_expired = s.get("end_date", "") < now_iso
+        is_active = bool(s.get("is_active", 1)) and not is_expired
+        badge = "💎 PRO" if s.get("plan", "").lower() == "pro" else "🛡️ Обычный"
 
-    rows.append([InlineKeyboardButton(text="🔄 Продлить подписку", callback_data="nav:plans")])
+        ed = s.get("end_date", "")
+        ed_display = ed.split("T")[0] if "T" in ed else ed.split(" ")[0]
+
+        status_text = "🟢 Активна" if is_active else ("🔴 Истекла" if is_expired else "⏸ Приостановлена")
+        bot_uname = s.get("bot_username")
+        bot_token = s.get("bot_token")
+        sub_id = s["id"]
+
+        text += (
+            f"<b>Подписка #{sub_id}</b> ({badge})\n"
+            f"• Статус: {status_text}\n"
+            f"• Действует до: <b>{ed_display}</b>\n"
+        )
+
+        if bot_uname and bot_token:
+            bid = manager.bot_id(bot_token) if manager else ""
+            is_run = manager.is_running(bid) if (manager and bid) else False
+            run_badge = "🟢 Работает" if is_run else "⏹ Остановлен"
+            text += f"• Бот: @{bot_uname} ({run_badge})\n\n"
+
+            add_url = f"https://t.me/{bot_uname}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
+            toggle_text = "⏹ Стоп" if is_run else "▶️ Старт"
+            rows.append([
+                InlineKeyboardButton(text="🔄 Сменить токен", callback_data=f"token:change:{sub_id}"),
+                InlineKeyboardButton(text=toggle_text, callback_data=f"bot:toggle:{sub_id}")
+            ])
+            rows.append([
+                InlineKeyboardButton(text=f"➕ Добавить @{bot_uname} в чат", url=add_url)
+            ])
+        else:
+            text += "• Бот: ⚠️ <i>Токен еще не привязан</i>\n\n"
+            if is_active:
+                rows.append([
+                    InlineKeyboardButton(text="🤖 Привязать токен бота", callback_data=f"token:bind:{sub_id}")
+                ])
+
+    rows.append([InlineKeyboardButton(text="💳 Продлить / Купить подписку", callback_data="nav:plans")])
     rows.append([InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")])
-    await cb.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    try:
+        await cb.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    except Exception:
+        await cb.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 # ============================== ИНФОРМАЦИЯ, FAQ И ОФЕРТА ==============================
@@ -531,9 +749,27 @@ async def cmd_give_sub(message: Message):
         return
 
     sub_info = db.add_or_extend_sub(target_uid, plan, months)
+
+    # Если бот уже был привязан — обновляем его в manager
+    if manager and sub_info.get("bot_username"):
+        s_full = db.get_subscription(sub_info["id"])
+        if s_full and s_full.get("bot_token"):
+            manager.spawn({
+                "id": manager.bot_id(s_full["bot_token"]),
+                "token": s_full["bot_token"],
+                "username": s_full.get("bot_username", ""),
+                "owner": target_uid,
+                "plan": plan,
+                "end_date": s_full.get("end_date", "")
+            })
+
+    sub_full = db.get_subscription(sub_info["id"])
+    card_kb = kb.admin_sub_card_kb(sub_full) if sub_full else None
+
     await message.answer(
         f"✅ Подписка <b>{plan.upper()}</b> на <b>{months} мес.</b> выдана пользователю <code>{target_uid}</code>!\n"
-        f"Действует до: <b>{sub_info['end_date']}</b>"
+        f"Действует до: <b>{sub_info['end_date']}</b>",
+        reply_markup=card_kb
     )
     if target_uid != uid:
         try:
@@ -546,3 +782,466 @@ async def cmd_give_sub(message: Message):
             )
         except Exception:
             pass
+
+
+@router.message(Command("sub"))
+async def cmd_sub(message: Message):
+    if not check_is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Формат: <code>/sub &lt;user_id или sub_id&gt;</code>")
+        return
+
+    arg = parts[1].strip().lstrip("@")
+    if arg.isdigit():
+        s = db.get_subscription(int(arg))
+        if s:
+            await send_sub_card(message, s)
+            return
+
+    subs = db.find_user_subs(arg)
+    if not subs:
+        await message.answer(f"Ничего не найдено по запросу <code>{esc(arg)}</code>.")
+        return
+
+    for s in subs[:3]:
+        await send_sub_card(message, s)
+
+
+@router.message(Command("cancel_sub"))
+async def cmd_cancel_sub(message: Message):
+    if not check_is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Формат: <code>/cancel_sub &lt;sub_id&gt;</code>")
+        return
+
+    try:
+        sub_id = int(parts[1])
+        s = db.get_subscription(sub_id)
+        if not s:
+            await message.answer("Подписка не найдена.")
+            return
+        db.toggle_sub_active(sub_id)
+        if s.get("bot_token") and manager:
+            manager.stop(manager.bot_id(s["bot_token"]))
+        await message.answer(f"✅ Подписка #{sub_id} деактивирована, процесс бота остановлен.")
+    except ValueError:
+        await message.answer("ID должен быть числом.")
+
+
+# ============================== АДМИН: CALLBACKS УПРАВЛЕНИЯ ==============================
+
+async def render_sub_card_text(s: dict) -> str:
+    now_iso = datetime.now().isoformat()
+    is_expired = s.get("end_date", "") < now_iso
+    is_active = bool(s.get("is_active", 1)) and not is_expired
+
+    status_badge = "🟢 Активна" if is_active else ("🔴 Истекла" if is_expired else "⏸ Приостановлена")
+    plan_badge = "💎 PRO" if s.get("plan", "").lower() == "pro" else "🛡️ Обычный"
+
+    b_uname = f"@{s['bot_username']}" if s.get("bot_username") else "не привязан"
+    tok_preview = f"<code>{s['bot_token'][:10]}...{s['bot_token'][-6:]}</code>" if s.get("bot_token") else "—"
+
+    proc_badge = "—"
+    if s.get("bot_token") and manager:
+        bid = manager.bot_id(s["bot_token"])
+        proc_badge = "🟢 Запущен" if manager.is_running(bid) else "⏹ Остановлен"
+
+    u_name = f"@{s['user_username']}" if s.get("user_username") else "—"
+
+    return (
+        f"📋 <b>Карточка подписки #{s['id']}</b>\n\n"
+        f"👤 <b>Пользователь:</b> {u_name} (ID: <code>{s['user_id']}</code>)\n"
+        f"🏷 <b>Тариф:</b> {plan_badge}\n"
+        f"⚡ <b>Статус:</b> {status_badge}\n"
+        f"📅 <b>Действует до:</b> <b>{s['end_date']}</b>\n\n"
+        f"🤖 <b>Привязанный бот:</b> {b_uname}\n"
+        f"⚙️ <b>Процесс бота:</b> {proc_badge}\n"
+        f"🔑 <b>Токен:</b> {tok_preview}\n"
+        f"⏱ <b>Создана:</b> {s.get('created_at', '—')}\n\n"
+        f"Выберите действие для управления:"
+    )
+
+
+async def send_sub_card(event: Message | CallbackQuery, s: dict):
+    text = await render_sub_card_text(s)
+    markup = kb.admin_sub_card_kb(s)
+    if isinstance(event, CallbackQuery):
+        try:
+            await event.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            await event.message.answer(text, reply_markup=markup)
+    else:
+        await event.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("admin:subs:"))
+async def cb_admin_subs_list(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+    await cb.answer()
+
+    parts = cb.data.split(":")
+    page = int(parts[2]) if len(parts) > 2 else 0
+
+    page_size = 6
+    subs = db.get_all_subscriptions(limit=page_size, offset=page * page_size)
+    total_count = db.count_subscriptions()
+
+    text = (
+        f"👥 <b>Управление подписками пользователей</b>\n\n"
+        f"Всего подписок в базе: <b>{total_count}</b>\n"
+        f"Страница <b>{page + 1}</b> из <b>{max(1, (total_count + page_size - 1) // page_size)}</b>\n\n"
+        f"<i>Нажмите на подписку для изменения срока, тарифа или отвязки бота:</i>"
+    )
+    markup = kb.admin_subs_list_kb(subs, page, total_count, page_size)
+    try:
+        await cb.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await cb.message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("admin:sub:add:"))
+async def cb_admin_sub_add(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    sub_id = int(parts[3])
+    days = int(parts[4])
+
+    new_sub = db.extend_sub_days(sub_id, days)
+    if not new_sub:
+        await cb.answer("Ошибка обновления", show_alert=True)
+        return
+
+    if manager and new_sub.get("bot_token"):
+        bid = manager.bot_id(new_sub["bot_token"])
+        if not manager.is_running(bid) and new_sub.get("is_active"):
+            manager.spawn({
+                "id": bid,
+                "token": new_sub["bot_token"],
+                "username": new_sub.get("bot_username", ""),
+                "owner": new_sub["user_id"],
+                "plan": new_sub.get("plan", "standard"),
+                "end_date": new_sub.get("end_date", "")
+            })
+
+    await cb.answer(f"✅ Продлено на {days} дн. До: {new_sub['end_date']}")
+    await send_sub_card(cb, new_sub)
+
+
+@router.callback_query(F.data.startswith("admin:sub:sub:"))
+async def cb_admin_sub_reduce(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    sub_id = int(parts[3])
+    days = int(parts[4])
+
+    new_sub = db.extend_sub_days(sub_id, -days)
+    if not new_sub:
+        await cb.answer("Ошибка обновления", show_alert=True)
+        return
+
+    await cb.answer(f"✅ Срок уменьшен на {days} дн. До: {new_sub['end_date']}")
+    await send_sub_card(cb, new_sub)
+
+
+@router.callback_query(F.data.startswith("admin:sub:custom:"))
+async def cb_admin_sub_custom_days(cb: CallbackQuery, state: FSMContext):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    sub_id = int(cb.data.split(":")[3])
+    s = db.get_subscription(sub_id)
+    if not s:
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    await state.set_state(UserStates.waiting_for_custom_days)
+    await state.update_data(sub_id=sub_id)
+    await cb.answer()
+
+    text = (
+        f"✏️ <b>Ручное изменение срока подписки #{sub_id}</b>\n\n"
+        f"Текущая дата окончания: <b>{s['end_date']}</b>\n\n"
+        f"Введите число дней для добавления или вычитания:\n"
+        f"• Например: <code>45</code> (добавить 45 дней)\n"
+        f"• Например: <code>-15</code> (отнять 15 дней)\n\n"
+        f"Отправьте число ответным сообщением:"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"admin:sub:{sub_id}")]
+    ])
+    await cb.message.edit_text(text, reply_markup=markup)
+
+
+@router.message(UserStates.waiting_for_custom_days)
+async def process_custom_days(message: Message, state: FSMContext):
+    if not check_is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    txt = (message.text or "").strip()
+    if txt.startswith("/"):
+        await state.clear()
+        await message.answer("Отменено.")
+        return
+
+    try:
+        days = int(txt)
+    except ValueError:
+        await message.answer("⚠️ Введите целое число дней (например, <code>30</code> или <code>-10</code>).")
+        return
+
+    data = await state.get_data()
+    sub_id = data.get("sub_id")
+    await state.clear()
+
+    new_sub = db.extend_sub_days(sub_id, days)
+    if not new_sub:
+        await message.answer("Ошибка: подписка не найдена.")
+        return
+
+    sign = "+" if days > 0 else ""
+    await message.answer(
+        f"✅ Срок подписки #{sub_id} изменен на {sign}{days} дн.!\n"
+        f"Новая дата окончания: <b>{new_sub['end_date']}</b>",
+        reply_markup=kb.admin_sub_card_kb(new_sub)
+    )
+
+
+@router.callback_query(F.data.startswith("admin:sub:plan:"))
+async def cb_admin_sub_plan(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    sub_id = int(cb.data.split(":")[3])
+    s = db.get_subscription(sub_id)
+    if not s:
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    cur_plan = s.get("plan", "standard").lower()
+    new_plan = "pro" if cur_plan == "standard" else "standard"
+    updated = db.set_sub_plan(sub_id, new_plan)
+
+    if manager and updated and updated.get("bot_token"):
+        bid = manager.bot_id(updated["bot_token"])
+        manager.spawn({
+            "id": bid,
+            "token": updated["bot_token"],
+            "username": updated.get("bot_username", ""),
+            "owner": updated["user_id"],
+            "plan": new_plan,
+            "end_date": updated.get("end_date", "")
+        })
+
+    await cb.answer(f"✅ Тариф переключен на {new_plan.upper()}")
+    await send_sub_card(cb, updated)
+
+
+@router.callback_query(F.data.startswith("admin:sub:toggle:"))
+async def cb_admin_sub_toggle(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    sub_id = int(cb.data.split(":")[3])
+    s = db.get_subscription(sub_id)
+    if not s:
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    is_now_active = db.toggle_sub_active(sub_id)
+    updated = db.get_subscription(sub_id)
+
+    if manager and s.get("bot_token"):
+        bid = manager.bot_id(s["bot_token"])
+        if is_now_active:
+            manager.spawn({
+                "id": bid,
+                "token": s["bot_token"],
+                "username": s.get("bot_username", ""),
+                "owner": s["user_id"],
+                "plan": s.get("plan", "standard"),
+                "end_date": s.get("end_date", "")
+            })
+        else:
+            manager.stop(bid)
+
+    status_str = "активирована" if is_now_active else "отозвана (деактивирована)"
+    await cb.answer(f"✅ Подписка #{sub_id} {status_str}")
+    await send_sub_card(cb, updated)
+
+
+@router.callback_query(F.data.startswith("admin:sub:unbind:"))
+async def cb_admin_sub_unbind(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    sub_id = int(cb.data.split(":")[3])
+    s = db.get_subscription(sub_id)
+    if not s:
+        await cb.answer("Подписка не найдена", show_alert=True)
+        return
+
+    old_token = s.get("bot_token")
+    if old_token and manager:
+        manager.stop(manager.bot_id(old_token))
+
+    db.unbind_sub_bot(sub_id)
+    updated = db.get_subscription(sub_id)
+    await cb.answer("✅ Бот отвязан от подписки")
+    await send_sub_card(cb, updated)
+
+
+@router.callback_query(F.data.startswith("admin:sub:"))
+async def cb_admin_sub_card(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    if len(parts) != 3:
+        return
+
+    sub_id = int(parts[2])
+    s = db.get_subscription(sub_id)
+    if not s:
+        await cb.answer("Подписка не найдена!", show_alert=True)
+        return
+
+    await cb.answer()
+    await send_sub_card(cb, s)
+
+
+@router.callback_query(F.data == "admin:search")
+async def cb_admin_search_prompt(cb: CallbackQuery, state: FSMContext):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+
+    await state.set_state(UserStates.waiting_for_search_query)
+    await cb.answer()
+
+    text = (
+        "🔍 <b>Поиск подписки</b>\n\n"
+        "Отправьте для поиска:\n"
+        "• Telegram ID пользователя (например: <code>7116116919</code>)\n"
+        "• Username пользователя (например: <code>bonzayka</code>)\n"
+        "• Юзернейм привязанного бота (например: <code>my_def_bot</code>)\n"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="admin:subs:0")]
+    ])
+    await cb.message.edit_text(text, reply_markup=markup)
+
+
+@router.message(UserStates.waiting_for_search_query)
+async def process_search_query(message: Message, state: FSMContext):
+    if not check_is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    query = (message.text or "").strip().lstrip("@")
+    if query.startswith("/"):
+        await state.clear()
+        await message.answer("Поиск отменен.")
+        return
+
+    await state.clear()
+    subs = db.find_user_subs(query)
+    if not subs:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔍 Попробовать еще раз", callback_data="admin:search")],
+            [InlineKeyboardButton(text="👥 Все подписки", callback_data="admin:subs:0")],
+        ])
+        await message.answer(f"По запросу <code>{esc(query)}</code> ничего не найдено.", reply_markup=markup)
+        return
+
+    rows = []
+    for s in subs:
+        is_act = bool(s.get("is_active", 1))
+        badge = "💎" if s.get("plan", "").lower() == "pro" else "🛡️"
+        status_dot = "🟢" if is_act else "🔴"
+        u_label = f"@{s['user_username']}" if s.get("user_username") else f"ID {s['user_id']}"
+        b_label = f"(@{s['bot_username']})" if s.get("bot_username") else "(нет бота)"
+        btn_text = f"{status_dot} {badge} #{s['id']} {u_label} {b_label}"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"admin:sub:{s['id']}")])
+
+    rows.append([InlineKeyboardButton(text="🔍 Новый поиск", callback_data="admin:search")])
+    rows.append([InlineKeyboardButton(text="👥 Все подписки", callback_data="admin:subs:0")])
+
+    await message.answer(
+        f"🔍 Найдено подписок: <b>{len(subs)}</b>\nВыберите подписку для управления:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+
+@router.callback_query(F.data == "admin:stats")
+async def cb_admin_stats(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+    await cb.answer()
+
+    st = db.get_stats()
+    text = (
+        f"📊 <b>Детальная статистика Chat Defense</b>\n\n"
+        f"👤 Зарегистрировано пользователей: <b>{st['users']}</b>\n"
+        f"💳 Оплаченных заказов: <b>{st['paid_orders']}</b>\n"
+        f"💰 Общий доход: <b>{st['total_rub']} руб</b>\n"
+        f"🟢 Активных подписок сейчас: <b>{st['active_subs']}</b>\n\n"
+        f"<i>Статистика обновляется в режиме реального времени.</i>"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Управление подписками", callback_data="admin:subs:0")],
+        [InlineKeyboardButton(text="⬅️ В админку", callback_data="admin:menu")]
+    ])
+    try:
+        await cb.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await cb.message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "admin:give")
+async def cb_admin_give(cb: CallbackQuery):
+    if not check_is_admin(cb.from_user.id):
+        await cb.answer("Доступ запрещен", show_alert=True)
+        return
+    await cb.answer()
+    text = (
+        "🎁 <b>Выдача подписки пользователю</b>\n\n"
+        "Используйте команду:\n"
+        "<code>/give_sub &lt;user_id&gt; &lt;months&gt; &lt;standard|pro&gt;</code>\n\n"
+        "Примеры:\n"
+        "• <code>/give_sub 7116116919 1 pro</code> (на 1 месяц PRO)\n"
+        "• <code>/give_sub 7116116919 12 pro</code> (на 1 год PRO)\n"
+        "• <code>/give_sub me 3 standard</code> (себе на 3 мес Обычный)"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ В админку", callback_data="admin:menu")]
+    ])
+    try:
+        await cb.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await cb.message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "admin:noop")
+async def cb_admin_noop(cb: CallbackQuery):
+    await cb.answer()
