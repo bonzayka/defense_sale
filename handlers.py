@@ -24,6 +24,7 @@ import database as db
 import prices
 import legal
 import keyboards as kb
+import sync_bridge
 
 # Подключаем менеджер дочерних ботов из родительского проекта
 if config.PARENT_DIR not in sys.path:
@@ -366,6 +367,21 @@ async def process_bot_token(message: Message, state: FSMContext):
     if sub_id:
         db.update_sub_bot(sub_id, str(me.id), me.username or "", token)
 
+    try:
+        await sync_bridge.notify_sync_event(
+            message.bot,
+            event="add_bot",
+            token=token,
+            username=me.username or "",
+            owner=uid,
+            password=gen_pass,
+            plan=plan,
+            end_date=end_date,
+            sub_id=sub_id
+        )
+    except Exception:
+        pass
+
     add_url = f"https://t.me/{me.username}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
 
     text = (
@@ -467,6 +483,21 @@ async def process_new_bot_token(message: Message, state: FSMContext):
 
     if sub_id:
         db.update_sub_bot(sub_id, str(me.id), me.username or "", token)
+
+    try:
+        await sync_bridge.notify_sync_event(
+            message.bot,
+            event="update_token",
+            old_token=old_token,
+            new_token=token,
+            username=me.username or "",
+            owner=uid,
+            plan=plan,
+            end_date=end_date,
+            sub_id=sub_id
+        )
+    except Exception:
+        pass
 
     add_url = f"https://t.me/{me.username}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
 
@@ -954,6 +985,15 @@ async def cb_admin_sub_add(cb: CallbackQuery):
 
     await cb.answer(f"✅ Продлено на {days} дн. До: {new_sub['end_date']}")
     await send_sub_card(cb, new_sub)
+    try:
+        await sync_bridge.notify_sync_event(
+            cb.bot, event="update_plan",
+            token=new_sub.get("bot_token", ""), username=new_sub.get("bot_username", ""),
+            owner=new_sub.get("user_id", 0), plan=new_sub.get("plan", "standard"),
+            end_date=new_sub.get("end_date", ""), sub_id=new_sub.get("id", 0)
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("admin:sub:sub:"))
@@ -1069,6 +1109,15 @@ async def cb_admin_sub_plan(cb: CallbackQuery):
 
     await cb.answer(f"✅ Тариф переключен на {new_plan.upper()}")
     await send_sub_card(cb, updated)
+    try:
+        await sync_bridge.notify_sync_event(
+            cb.bot, event="update_plan",
+            token=updated.get("bot_token", ""), username=updated.get("bot_username", ""),
+            owner=updated.get("user_id", 0), plan=new_plan,
+            end_date=updated.get("end_date", ""), sub_id=updated.get("id", 0)
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("admin:sub:toggle:"))
@@ -1103,6 +1152,15 @@ async def cb_admin_sub_toggle(cb: CallbackQuery):
     status_str = "активирована" if is_now_active else "отозвана (деактивирована)"
     await cb.answer(f"✅ Подписка #{sub_id} {status_str}")
     await send_sub_card(cb, updated)
+    try:
+        await sync_bridge.notify_sync_event(
+            cb.bot, event="start_bot" if is_now_active else "stop_bot",
+            token=s.get("bot_token", ""), username=s.get("bot_username", ""),
+            owner=s.get("user_id", 0), plan=s.get("plan", "standard"),
+            end_date=s.get("end_date", ""), sub_id=sub_id
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("admin:sub:unbind:"))
