@@ -336,6 +336,14 @@ async def process_bot_token(message: Message, state: FSMContext):
     sub_id = data.get("sub_id")
     await state.clear()
 
+    if not sub_id:
+        active_sub = db.get_active_sub(uid)
+        if active_sub:
+            sub_id = active_sub["id"]
+        else:
+            sub_res = db.add_or_extend_sub(uid, "standard", 1, bot_token=token, bot_username=me.username or "", bot_id=str(me.id))
+            sub_id = sub_res["id"]
+
     sub = db.get_subscription(sub_id) if sub_id else None
     plan = sub.get("plan", "standard") if sub else "standard"
     end_date = sub.get("end_date", "") if sub else ""
@@ -489,8 +497,12 @@ async def cb_bot_toggle(cb: CallbackQuery):
         return
 
     bot_token = sub.get("bot_token")
-    if not bot_token or not manager:
-        await cb.answer("Токен бота не найден", show_alert=True)
+    if not bot_token:
+        await cb.answer("⚠️ Токен бота не привязан к этой подписке.", show_alert=True)
+        return
+
+    if not manager:
+        await cb.answer("ℹ️ Бот привязан к подписке. Процессы ботов работают на основном сервере.", show_alert=True)
         return
 
     bid = manager.bot_id(bot_token)
@@ -562,17 +574,23 @@ async def cb_my_subs(cb: CallbackQuery):
         )
 
         if bot_uname and bot_token:
-            bid = manager.bot_id(bot_token) if manager else ""
-            is_run = manager.is_running(bid) if (manager and bid) else False
-            run_badge = "🟢 Работает" if is_run else "⏹ Остановлен"
+            if manager:
+                bid = manager.bot_id(bot_token)
+                is_run = manager.is_running(bid)
+                run_badge = "🟢 Работает" if is_run else "⏹ Остановлен"
+                toggle_text = "⏹ Стоп" if is_run else "▶️ Старт"
+                rows.append([
+                    InlineKeyboardButton(text="🔄 Сменить токен", callback_data=f"token:change:{sub_id}"),
+                    InlineKeyboardButton(text=toggle_text, callback_data=f"bot:toggle:{sub_id}")
+                ])
+            else:
+                run_badge = "🟢 Привязан"
+                rows.append([
+                    InlineKeyboardButton(text="🔄 Сменить токен", callback_data=f"token:change:{sub_id}")
+                ])
             text += f"• Бот: @{bot_uname} ({run_badge})\n\n"
 
             add_url = f"https://t.me/{bot_uname}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
-            toggle_text = "⏹ Стоп" if is_run else "▶️ Старт"
-            rows.append([
-                InlineKeyboardButton(text="🔄 Сменить токен", callback_data=f"token:change:{sub_id}"),
-                InlineKeyboardButton(text=toggle_text, callback_data=f"bot:toggle:{sub_id}")
-            ])
             rows.append([
                 InlineKeyboardButton(text=f"➕ Добавить @{bot_uname} в чат", url=add_url)
             ])
