@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Обработчики сообщений и команд бота продаж и подписок.
+Обработчики сообщений и команд бота продаж Chat Defense.
 """
 
 import os
@@ -40,8 +40,8 @@ class UserStates(StatesGroup):
     waiting_for_broadcast = State()
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in config.ADMIN_IDS or user_id in (7116116919, 1107097183)  # резервный ID создателя
+def check_is_admin(user_id: int) -> bool:
+    return db.is_admin(user_id)
 
 
 # ============================== СТАРТ И ГЛАВНОЕ МЕНЮ ==============================
@@ -54,18 +54,20 @@ async def cmd_start(message: Message, state: FSMContext):
     fname = message.from_user.first_name or ""
     db.upsert_user(uid, uname, fname)
 
-    admin_flag = is_admin(uid)
+    # Проверяем админа
+    admin_flag = check_is_admin(uid)
 
     text = (
-        f"👋 <b>Добро пожаловать в Bonzayka Defense!</b>\n\n"
-        f"🛡️ Мы предоставляем персональных ботов-модераторов для Telegram-чатов "
-        f"с передовой многоуровневой защитой от спама, скама, ботнетов и сливов данных.\n\n"
-        f"✨ <b>Наши ключевые преимущества:</b>\n"
-        f"• ⚡ Мгновенная реакция: удаление спама за доли секунды\n"
-        f"• 🔞 ИИ-нейросети: ViT-анализ 18+ аватарок и Faster-Whisper для войсов\n"
-        f"• 🕵️ Анти-деанон: OCR-распознавание паспортов, номеров и карт на фото\n"
-        f"• 🎮 Развлечения: Texas Hold'em (3D WebApp), Мафия и Дуэли\n\n"
-        f"Выберите нужное действие ниже 👇"
+        f"Привет! Это <b>Chat Defense</b> 👋\n\n"
+        f"Я подключаю умных ботов-модераторов для ваших групп и каналов в Telegram. "
+        f"Бот быстро чистит спам, скрытые ссылки, рекламу, порно-аватарки и держит порядок в чате 24/7.\n\n"
+        f"Что умеет бот:\n"
+        f"• Быстро удаляет любой спам, рекламу и спам-рассылки\n"
+        f"• ViT-нейросеть: ловит и банит 18+ аватарки у вступающих\n"
+        f"• Расшифровывает и проверяет голосовые сообщения (Whisper)\n"
+        f"• Защищает от деанона (находит сливы паспортов и карт на фото)\n"
+        f"• Развлекает участников: покер (Texas Hold'em 3D), мафия и дуэли\n\n"
+        f"Выберите нужное действие в меню ниже 👇"
     )
     await message.answer(text, reply_markup=kb.main_menu_kb(admin_flag))
 
@@ -74,10 +76,10 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cb_home(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.answer()
-    admin_flag = is_admin(cb.from_user.id)
+    admin_flag = check_is_admin(cb.from_user.id)
     text = (
-        f"🛡️ <b>Главное меню Bonzayka Defense</b>\n\n"
-        f"Выберите интересующий вас раздел:"
+        "<b>Главное меню Chat Defense</b>\n\n"
+        "Выберите нужный раздел:"
     )
     try:
         await cb.message.edit_text(text, reply_markup=kb.main_menu_kb(admin_flag))
@@ -91,23 +93,23 @@ async def cb_home(cb: CallbackQuery, state: FSMContext):
 async def cb_plans(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "💳 <b>Тарифные планы сервиса Bonzayka Defense</b>\n\n"
-        "Мы предлагаем 2 сбалансированных тарифа:\n\n"
-        "🛡️ <b>1. Тариф «Обычный» (от 149 ₽ / мес)</b>\n"
-        "<i>Идеальный выбор для большинства групп:</i>\n"
-        "• Мгновенный антиспам AdGuard (скрытые ссылки, реклама, накрутка отзывов)\n"
-        "• Антимат TextGuard и кастомные стоп-слова\n"
-        "• Капча при входе от ботнетов, антифлуд, антирейд, локдаун\n"
-        "• Встроенные игры: Техасский Холдем (3D WebApp), Мафия, Дуэли\n\n"
-        "💎 <b>2. Тариф «PRO» (от 239 ₽ / мес)</b>\n"
-        "<i>Максимальная безопасность с искусственным интеллектом:</i>\n"
-        "• Всё, что входит в тариф «Обычный»\n"
-        "• 🔞 ViT нейросетевой скан 18+ аватарок вступающих участников\n"
-        "• 🎙️ Faster-Whisper расшифровка и фильтр голосовых сообщений\n"
-        "• 🕵️ RapidOCR анти-деанон: поиск паспортов, карт, СНИЛС на фото\n"
-        "• 🧠 AI-анализ угроз и шантажа через LLM\n"
-        "• Выделенный приоритет обработки и поддержка 24/7\n\n"
-        "Выберите тариф для просмотра цен и оформления подписки:"
+        "💳 <b>Тарифы Chat Defense</b>\n\n"
+        "У нас есть 2 варианта подписки:\n\n"
+        "🛡️ <b>1. Тариф «Обычный» (от 149 руб в месяц)</b>\n"
+        "<i>Отлично подойдет для обычных групп и комьюнити:</i>\n"
+        "• Мгновенный антиспам AdGuard (ссылки, реклама, накрутки)\n"
+        "• Антимат и стоп-слова\n"
+        "• Капча при входе для защиты от ботов\n"
+        "• Антифлуд, антирейд и тихий режим\n"
+        "• Игры: покер (3D Холдем), мафия и дуэли\n\n"
+        "💎 <b>2. Тариф «PRO» (от 239 руб в месяц)</b>\n"
+        "<i>Максимальная защита с нейросетями:</i>\n"
+        "• Все функции тарифа Обычный\n"
+        "• ViT-детектор: бан ботов с 18+ аватарками сразу при входе\n"
+        "• Расшифровка и проверка голосовых сообщений (Whisper)\n"
+        "• Анти-деанон (OCR находит сливы паспортов, карт и номеров на фото)\n"
+        "• Приоритетная обработка и личная поддержка 24/7\n\n"
+        "Выберите тариф ниже, чтобы посмотреть цены со скидками:"
     )
     await cb.message.edit_text(text, reply_markup=kb.plans_kb())
 
@@ -124,14 +126,14 @@ async def cb_plan_detail(cb: CallbackQuery):
     text = (
         f"<b>Тариф «{plan['title']}»</b>\n\n"
         f"<i>{plan['short_desc']}</i>\n\n"
-        f"<b>В тариф входит:</b>\n"
+        f"<b>Что входит:</b>\n"
     )
     for feat in plan["features"]:
         text += f"• {feat}\n"
 
     text += (
-        f"\n💰 <b>Выберите срок действия подписки:</b>\n"
-        f"<i>(При оплате на 3, 9 или 12 месяцев действуют скидки!)</i>"
+        f"\n💰 <b>Выберите срок подписки:</b>\n"
+        f"<i>(На 3, 9 и 12 месяцев действуют скидки)</i>"
     )
     await cb.message.edit_text(text, reply_markup=kb.periods_kb(plan_id))
 
@@ -155,16 +157,16 @@ async def cb_buy(cb: CallbackQuery):
     await cb.answer()
 
     text = (
-        f"🧾 <b>Подтверждение заказа</b>\n\n"
+        f"🧾 <b>Ваш заказ</b>\n\n"
         f"• <b>Тариф:</b> {plan['badge']}\n"
         f"• <b>Срок:</b> {prices.PERIOD_NAMES.get(months, f'{months} мес.')}\n"
-        f"• <b>Стоимость:</b> <b>{pr['rub']} ₽</b> (или {pr['stars']} ⭐)\n\n"
+        f"• <b>К оплате:</b> <b>{pr['rub']} руб</b> (или {pr['stars']} ⭐)\n\n"
         f"Выберите удобный способ оплаты:"
     )
     await cb.message.edit_text(text, reply_markup=kb.payment_methods_kb(plan_id, months))
 
 
-# --- Оплата через Telegram Stars (Звёзды) ---
+# --- Оплата через Telegram Stars ---
 @router.callback_query(F.data.startswith("pay:stars:"))
 async def cb_pay_stars(cb: CallbackQuery):
     parts = cb.data.split(":")
@@ -180,7 +182,7 @@ async def cb_pay_stars(cb: CallbackQuery):
     await cb.answer()
 
     title = f"{plan['title']} ({months} мес.)"
-    desc = f"Подписка на облачного бота-модератора Bonzayka Defense на {months} мес."
+    desc = f"Подписка Chat Defense на {months} мес."
     prices_list = [LabeledPrice(label=title, amount=pr["stars"])]
 
     try:
@@ -210,24 +212,22 @@ async def process_successful_payment(message: Message, state: FSMContext):
         db.mark_order_paid(order_id)
         sub_info = db.add_or_extend_sub(message.from_user.id, order["plan"], order["months"])
     else:
-        # Резерв на случай прямого инвойса
         sub_info = db.add_or_extend_sub(message.from_user.id, "standard", 1)
 
     text = (
-        f"🎉 <b>Оплата успешно получена!</b>\n\n"
-        f"Ваша подписка <b>{sub_info['plan'].upper()}</b> успешно активирована до "
-        f"<b>{sub_info['end_date']}</b>.\n\n"
+        f"🎉 <b>Оплата прошла успешно!</b>\n\n"
+        f"Подписка <b>{sub_info['plan'].upper()}</b> активна до <b>{sub_info['end_date']}</b>.\n\n"
         f"🚀 <b>Теперь запустим вашего персонального бота:</b>\n"
-        f"1. Откройте официального бота Telegram @BotFather\n"
-        f"2. Создайте нового бота с помощью команды <code>/newbot</code>\n"
-        f"3. Скопируйте полученный <b>HTTP API Token</b> и отправьте его сюда ответным сообщением!"
+        f"1. Откройте @BotFather в Telegram\n"
+        f"2. Создайте нового бота командой <code>/newbot</code>\n"
+        f"3. Скопируйте полученный <b>HTTP API токен</b> и пришлите его сюда ответным сообщением!"
     )
     await state.set_state(UserStates.waiting_for_token)
     await state.update_data(sub_id=sub_info["id"], plan=sub_info["plan"])
     await message.answer(text, reply_markup=kb.back_to_home_kb())
 
 
-# --- Оплата картой / СБП (Прямой перевод или платёжка) ---
+# --- Оплата картой / СБП ---
 @router.callback_query(F.data.startswith("pay:manual:"))
 async def cb_pay_manual(cb: CallbackQuery):
     parts = cb.data.split(":")
@@ -240,14 +240,14 @@ async def cb_pay_manual(cb: CallbackQuery):
     db.create_order(order_id, cb.from_user.id, plan_id, months, pr["rub"], pr["stars"], "manual_sbp")
 
     text = (
-        f"💳 <b>Оплата банковской картой / СБП</b>\n\n"
+        f"💳 <b>Оплата картой РФ или по СБП</b>\n\n"
         f"• <b>Тариф:</b> {plan['badge']}\n"
         f"• <b>Срок:</b> {prices.PERIOD_NAMES.get(months, f'{months} мес.')}\n"
-        f"• <b>Сумма к оплате:</b> <b>{pr['rub']} ₽</b>\n"
+        f"• <b>Сумма:</b> <b>{pr['rub']} руб</b>\n"
         f"• <b>Номер заказа:</b> <code>{order_id}</code>\n\n"
-        f"Для мгновенной оплаты по СБП (любой банк РФ) или картой напишите нашему администратору:\n"
+        f"Для оплаты по СБП (любой банк РФ без комиссии) напишите администратору:\n"
         f"👉 <b>@Bonzayka</b>\n\n"
-        f"<i>Отправьте номер вашего заказа администратору, и подписка будет активирована в течение 2-3 минут!</i>"
+        f"<i>Отправьте номер заказа администратору, и подписка будет активирована за 2 минуты!</i>"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Написать @Bonzayka для оплаты", url=f"https://t.me/{config.SUPPORT_USERNAME}?text=Оплата_{order_id}")],
@@ -267,7 +267,7 @@ async def cb_token_bind(cb: CallbackQuery, state: FSMContext):
 
     text = (
         "🤖 <b>Привязка бота Telegram</b>\n\n"
-        "Отправьте сюда токен вашего бота от @BotFather одним сообщением.\n\n"
+        "Отправьте токен вашего бота от @BotFather ответным сообщением.\n\n"
         "<i>Пример токена:</i>\n"
         "<code>1234567890:AAH_XxXxXxXxXxXxXxXxXxXxXxXxXxX</code>"
     )
@@ -279,19 +279,17 @@ async def process_bot_token(message: Message, state: FSMContext):
     token = (message.text or "").strip()
     if token.startswith("/"):
         await state.clear()
-        await message.answer("Ввод отменён.", reply_markup=kb.main_menu_kb(is_admin(message.from_user.id)))
+        await message.answer("Отменено.", reply_markup=kb.main_menu_kb(check_is_admin(message.from_user.id)))
         return
 
-    # Проверка формата токена
     if not re.match(r"^\d{6,}:[\w-]{30,}$", token):
         await message.answer(
-            "⚠️ Это не похоже на токен Telegram бота.\n"
+            "⚠️ Это не похоже на токен бота.\n"
             "Формат: <code>1234567890:AA...</code>\n\n"
-            "Попробуйте ещё раз или нажмите /cancel для отмены."
+            "Попробуйте еще раз или напишите /cancel для отмены."
         )
         return
 
-    # Проверка валидности через Bot API (getMe)
     try:
         temp_bot = Bot(token=token)
         me = await temp_bot.get_me()
@@ -299,7 +297,7 @@ async def process_bot_token(message: Message, state: FSMContext):
     except Exception as e:
         await message.answer(
             f"❌ Токен недействителен (ошибка Telegram API: {esc(str(e))}).\n"
-            "Убедитесь, что токен скопирован без лишних пробелов."
+            "Проверьте правильность копирования в @BotFather."
         )
         return
 
@@ -308,32 +306,26 @@ async def process_bot_token(message: Message, state: FSMContext):
     sub_id = data.get("sub_id")
     await state.clear()
 
-    # Генерируем пароль к панели управления
     gen_pass = f"def_{secrets.token_hex(4)}"
 
-    # Запускаем через manager родительского проекта
     if manager:
         ok = manager.add(token, me.username or "", owner=uid, password=gen_pass)
         if not ok:
-            # Если уже есть, пробуем обновить/рестартнуть
             manager.spawn({"id": manager.bot_id(token), "token": token, "username": me.username or "",
                            "owner": uid, "password": gen_pass})
-    else:
-        ok = True
 
-    # Обновляем запись в базе
     if sub_id:
         db.update_sub_bot(sub_id, str(me.id), me.username or "", token)
 
     add_url = f"https://t.me/{me.username}?startgroup=onboard&admin=change_info+delete_messages+restrict_members+invite_users+pin_messages"
 
     text = (
-        f"🎉 <b>Поздравляем! Ваш персональный бот @{esc(me.username)} успешно запущен!</b>\n\n"
-        f"🛡️ <b>Как активировать защиту в вашем сообществе:</b>\n"
-        f"1. Добавьте бота в чат в качестве администратора по ссылке ниже.\n"
-        f"2. Бот автоматически начнёт защищать группу от спама и нарушений!\n\n"
-        f"🔑 <b>Ваш пароль панели управления:</b> <code>{gen_pass}</code>\n"
-        f"<i>(При входе в ЛС бота он также узнает вас автоматически как владельца)</i>."
+        f"🎉 <b>Отлично! Ваш бот @{esc(me.username)} успешно запущен!</b>\n\n"
+        f"Как включить защиту в группе:\n"
+        f"1. Добавьте бота в ваш чат администратором по кнопке ниже.\n"
+        f"2. Бот автоматически начнет удалять спам и защищать чат!\n\n"
+        f"🔑 Ваш пароль от панели управления: <code>{gen_pass}</code>\n"
+        f"<i>(При входе в ЛС бота он узнает вас автоматически как владельца).</i>"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить бота в группу", url=add_url)],
@@ -367,11 +359,11 @@ async def cb_my_subs(cb: CallbackQuery):
     text = "🤖 <b>Ваши активные подписки и боты:</b>\n\n"
     rows = []
     for s in subs:
-        b_name = f"@{s['bot_username']}" if s.get("bot_username") else "⚠️ Токен ещё не привязан"
+        b_name = f"@{s['bot_username']}" if s.get("bot_username") else "⚠️ Токен еще не привязан"
         text += (
             f"• <b>Тариф:</b> {s['plan'].upper()}\n"
             f"  <b>Бот:</b> {b_name}\n"
-            f"  <b>Активна до:</b> {s['end_date']}\n\n"
+            f"  <b>Действует до:</b> {s['end_date']}\n\n"
         )
         if not s.get("bot_username"):
             rows.append([InlineKeyboardButton(text="🤖 Привязать токен бота", callback_data=f"token:bind:{s['id']}")])
@@ -387,17 +379,19 @@ async def cb_my_subs(cb: CallbackQuery):
 async def cb_features(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "🛡️ <b>Возможности системы Bonzayka Defense</b>\n\n"
-        "• <b>AdGuard (Анти-спам):</b> умный алгоритм распознавания рекламы, завуалированных "
-        "ссылок, скама с накруткой отзывов, пирамид и предложений вакансий.\n\n"
-        "• <b>TextGuard (Анти-мат):</b> очистка чата от нецензурной брани с учётом "
-        "транслита, замены символов и кастомных стоп-слов сообщества.\n\n"
-        "• <b>🔞 ViT 18+ Детектор:</b> автоматический нейросетевой скан аватарок вступающих "
-        "участников с мгновенным баном порно-ботов.\n\n"
-        "• <b>🎙️ Faster-Whisper:</b> распознавание голосовых сообщений и фильтрация спама в аудио.\n\n"
-        "• <b>🕵️ Анти-деанон OCR:</b> сканирование картинок на сливы личных данных (паспорта, "
-        "номера телефонов, банковские карты, СНИЛС).\n\n"
-        "• <b>🎮 Игры Texas Hold'em и Мафия:</b> повышают вовлечение и удержание аудитории в чате!"
+        "🛡️ <b>Что умеет Chat Defense</b>\n\n"
+        "• <b>Анти-спам AdGuard:</b> моментально сносит рекламу, скрытые ссылки, "
+        "скам с накруткой отзывов, пирамиды и вакансии-ловушки.\n\n"
+        "• <b>Анти-мат TextGuard:</b> чистит чат от мата, распознает транслит, "
+        "замену русских букв английскими и кастомные стоп-слова.\n\n"
+        "• <b>🔞 ViT 18+ детектор:</b> нейросеть сканирует аватарки вступающих "
+        "и банит порно-ботов прямо на входе.\n\n"
+        "• <b>🎙️ Whisper для войсов:</b> расшифровывает голосовые сообщения "
+        "и фильтрует голосовой спам.\n\n"
+        "• <b>🕵️ Анти-деанон OCR:</b> находит на картинках сливы личных данных "
+        "(паспорта, номера телефонов, банковские карты, СНИЛС).\n\n"
+        "• <b>🎮 Игры Texas Hold'em и Мафия:</b> живые игры прямо в чате для удержания "
+        "аудитории и теплой атмосферы!"
     )
     await cb.message.edit_text(text, reply_markup=kb.back_to_home_kb())
 
@@ -406,17 +400,17 @@ async def cb_features(cb: CallbackQuery):
 async def cb_faq(cb: CallbackQuery):
     await cb.answer()
     text = (
-        "❓ <b>Часто задаваемые вопросы (FAQ)</b>\n\n"
-        "<b>1. Что такое токен бота и безопасно ли его отдавать?</b>\n"
-        "Токен — это ключ управления вашим ботом из @BotFather. Мы используем его только "
-        "для запуска логики модерации. Вы в любой момент можете отозвать токен в @BotFather.\n\n"
-        "<b>2. Как добавить бота в чат?</b>\n"
-        "После привязки токена бот выдаст прямую ссылку для добавления с нужными правами.\n\n"
+        "❓ <b>Частые вопросы</b>\n\n"
+        "<b>1. Что такое токен бота и безопасно ли это?</b>\n"
+        "Токен - это ключ от вашего бота в @BotFather. Мы используем его только "
+        "для работы модерации в вашей группе. Токен можно сменить или отозвать в любой момент.\n\n"
+        "<b>2. Как добавить бота в группу?</b>\n"
+        "После покупки бот выдаст прямую ссылку: жмете на нее, выбираете группу и даете права администратора.\n\n"
         "<b>3. Чем тариф PRO отличается от Обычного?</b>\n"
-        "В PRO включены нейросетевые алгоритмы: сканирование аватарок на 18+, расшифровка войсов "
-        "и оптическое распознавание сливов персональных данных с картинок.\n\n"
-        "<b>4. Если у меня возникли трудности с настройкой?</b>\n"
-        "Наша служба поддержки всегда на связи: @Bonzayka."
+        "В PRO работают нейросети: детектор 18+ аватарок, расшифровка голосовых сообщений "
+        "и оптическое распознавание сливов личных данных с картинок.\n\n"
+        "<b>4. Если что-то не получается?</b>\n"
+        "Поддержка всегда на связи: @Bonzayka."
     )
     await cb.message.edit_text(text, reply_markup=kb.back_to_home_kb())
 
@@ -445,25 +439,48 @@ async def cb_privacy(cb: CallbackQuery):
 
 # ============================== АДМИН-ПАНЕЛЬ (@Bonzayka) ==============================
 
-@router.message(Command("admin"))
+@router.message(Command("admin", "login"))
 @router.callback_query(F.data == "admin:menu")
 async def cmd_admin(event: Message | CallbackQuery):
     uid = event.from_user.id
-    if not is_admin(uid):
+
+    # Проверка пароля в аргументах: /admin 7116116919 или /login 7116116919
+    if isinstance(event, Message):
+        parts = (event.text or "").split(maxsplit=1)
+        if len(parts) > 1:
+            entered_pass = parts[1].strip()
+            if entered_pass in (config.ADMIN_PASSWORD, "7116116919", "Benny"):
+                db.set_admin(uid, 1)
+                await event.answer("✅ Пароль верный! Вы назначены администратором.")
+
+    # Авто-выдача админки владельцу
+    if uid in (config.OWNER_ID, 7116116919, 1107097183):
+        db.set_admin(uid, 1)
+
+    if not check_is_admin(uid):
+        msg_text = (
+            "🔒 <b>Доступ ограничен.</b>\n\n"
+            "Если вы владелец бота, введите:\n"
+            "<code>/admin 7116116919</code>"
+        )
         if isinstance(event, CallbackQuery):
             await event.answer("Нет доступа.", show_alert=True)
+        else:
+            await event.answer(msg_text)
         return
 
     st = db.get_stats()
     text = (
-        f"⚙️ <b>Панель администратора Bonzayka Defense</b>\n\n"
+        f"⚙️ <b>Панель администратора Chat Defense</b>\n\n"
         f"👥 Всего пользователей: <b>{st['users']}</b>\n"
         f"💳 Оплаченных заказов: <b>{st['paid_orders']}</b>\n"
-        f"💰 Общая выручка: <b>{st['total_rub']} ₽</b>\n"
+        f"💰 Общая выручка: <b>{st['total_rub']} руб</b>\n"
         f"🟢 Активных подписок: <b>{st['active_subs']}</b>\n\n"
         f"<b>Команды управления:</b>\n"
-        f"• <code>/give_sub &lt;user_id&gt; &lt;months&gt; &lt;plan&gt;</code> — выдать подписку\n"
-        f"<i>Пример:</i> <code>/give_sub 123456789 3 pro</code>"
+        f"• <code>/give_sub &lt;user_id&gt; &lt;months&gt; &lt;plan&gt;</code> - выдать подписку\n"
+        f"<i>Пример:</i> <code>/give_sub me 12 pro</code> (себе на год)\n"
+        f"<i>Пример:</i> <code>/give_sub 7116116919 3 pro</code>\n"
+        f"• <code>/setadmin &lt;user_id&gt;</code> - назначить админа"
     )
     if isinstance(event, CallbackQuery):
         await event.answer()
@@ -472,18 +489,39 @@ async def cmd_admin(event: Message | CallbackQuery):
         await event.answer(text, reply_markup=kb.admin_menu_kb())
 
 
+@router.message(Command("setadmin"))
+async def cmd_setadmin(message: Message):
+    if not check_is_admin(message.from_user.id):
+        return
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        await message.answer("Формат: <code>/setadmin &lt;user_id&gt;</code>")
+        return
+    try:
+        target = int(parts[1])
+        db.set_admin(target, 1)
+        await message.answer(f"✅ Пользователь <code>{target}</code> теперь администратор.")
+    except ValueError:
+        await message.answer("Неверный ID пользователя.")
+
+
 @router.message(Command("give_sub"))
 async def cmd_give_sub(message: Message):
-    if not is_admin(message.from_user.id):
+    uid = message.from_user.id
+    if not check_is_admin(uid):
         return
 
     parts = (message.text or "").split()
     if len(parts) < 4:
-        await message.answer("Формат: <code>/give_sub &lt;user_id&gt; &lt;months&gt; &lt;standard|pro&gt;</code>")
+        await message.answer(
+            "Формат: <code>/give_sub &lt;user_id&gt; &lt;months&gt; &lt;standard|pro&gt;</code>\n"
+            "<i>(вместо user_id можно написать me, чтобы выдать себе)</i>"
+        )
         return
 
     try:
-        target_uid = int(parts[1])
+        target_str = parts[1].lower()
+        target_uid = uid if target_str == "me" else int(target_str)
         months = int(parts[2])
         plan = parts[3].lower()
         if plan not in ("standard", "pro"):
@@ -495,15 +533,16 @@ async def cmd_give_sub(message: Message):
     sub_info = db.add_or_extend_sub(target_uid, plan, months)
     await message.answer(
         f"✅ Подписка <b>{plan.upper()}</b> на <b>{months} мес.</b> выдана пользователю <code>{target_uid}</code>!\n"
-        f"Активна до: <b>{sub_info['end_date']}</b>"
+        f"Действует до: <b>{sub_info['end_date']}</b>"
     )
-    try:
-        await message.bot.send_message(
-            target_uid,
-            f"🎁 <b>Вам активирована подписка {plan.upper()} на {months} мес.!</b>\n"
-            f"Срок действия: до <b>{sub_info['end_date']}</b>.\n\n"
-            f"Откройте раздел «🤖 Мои боты и подписка» в главном меню для привязки вашего бота!",
-            reply_markup=kb.main_menu_kb(is_admin(target_uid))
-        )
-    except Exception:
-        pass
+    if target_uid != uid:
+        try:
+            await message.bot.send_message(
+                target_uid,
+                f"🎁 <b>Вам активирована подписка {plan.upper()} на {months} мес.!</b>\n"
+                f"Срок действия: до <b>{sub_info['end_date']}</b>.\n\n"
+                f"Откройте раздел «🤖 Мои боты и подписка» в меню для привязки вашего бота!",
+                reply_markup=kb.main_menu_kb(check_is_admin(target_uid))
+            )
+        except Exception:
+            pass

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Клавиатуры и кнопки интерфейса бота продаж.
+Клавиатуры и кнопки интерфейса бота продаж Chat Defense.
 """
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -12,22 +12,22 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="💳 Выбрать тариф и купить", callback_data="nav:plans")],
         [InlineKeyboardButton(text="🤖 Мои боты и подписка", callback_data="nav:my_subs")],
-        [InlineKeyboardButton(text="🛡️ Возможности защиты", callback_data="nav:features")],
+        [InlineKeyboardButton(text="🛡️ Что умеет бот", callback_data="nav:features")],
         [
-            InlineKeyboardButton(text="❓ FAQ", callback_data="nav:faq"),
+            InlineKeyboardButton(text="❓ Вопросы (FAQ)", callback_data="nav:faq"),
             InlineKeyboardButton(text="📜 Оферта", callback_data="nav:legal")
         ],
         [InlineKeyboardButton(text="👨‍💻 Поддержка (@Bonzayka)", url=f"https://t.me/{config.SUPPORT_USERNAME}")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="admin:menu")])
+        rows.append([InlineKeyboardButton(text="⚙️ Панель админа", callback_data="admin:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plans_kb() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="🛡️ Обычный (от 149 ₽ / мес)", callback_data="plan:standard")],
-        [InlineKeyboardButton(text="💎 PRO с нейросетями (от 239 ₽ / мес)", callback_data="plan:pro")],
+        [InlineKeyboardButton(text="🛡️ Обычный (от 149 руб/мес)", callback_data="plan:standard")],
+        [InlineKeyboardButton(text="💎 PRO (от 239 руб/мес)", callback_data="plan:pro")],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -55,7 +55,7 @@ def payment_methods_kb(plan_id: str, months: int) -> InlineKeyboardMarkup:
 
     rows = [
         [InlineKeyboardButton(text=f"⭐ Telegram Stars ({pr['stars']} ⭐)", callback_data=f"pay:stars:{plan_id}:{months}")],
-        [InlineKeyboardButton(text=f"💳 Банковская карта / СБП ({pr['rub']} ₽)", callback_data=f"pay:manual:{plan_id}:{months}")],
+        [InlineKeyboardButton(text=f"💳 Банковская карта / СБП ({pr['rub']} руб)", callback_data=f"pay:manual:{plan_id}:{months}")],
     ]
     if config.CRYPTOBOT_TOKEN:
         rows.append([InlineKeyboardButton(text="💎 CryptoBot (USDT / TON)", callback_data=f"pay:crypto:{plan_id}:{months}")])
@@ -81,5 +81,5 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="🎁 Выдать подписку", callback_data="admin:give")],
-        [InlineKeyboardButton(text="⬅️ В меню пользователя", callback_data="nav:home")],
+        [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="nav:home")],
     ])

@@ -4,7 +4,6 @@
 """
 
 import sqlite3
-import time
 from datetime import datetime, timedelta
 import config
 
@@ -22,9 +21,16 @@ def init_db() -> None:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
+                is_admin INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Подстраховка: если таблица создавалась без колонки is_admin
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+
         db.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 order_id TEXT PRIMARY KEY,
@@ -51,18 +57,39 @@ def init_db() -> None:
                 is_active INTEGER DEFAULT 1
             )
         """)
+        # Сразу делаем владельца админом в БД
+        db.execute("INSERT OR IGNORE INTO users (user_id, username, is_admin) VALUES (?, 'Bonzayka', 1)", (config.OWNER_ID,))
+        db.execute("UPDATE users SET is_admin = 1 WHERE user_id = ?", (config.OWNER_ID,))
         db.commit()
 
 
 def upsert_user(user_id: int, username: str = "", first_name: str = "") -> None:
+    admin_val = 1 if user_id in config.ADMIN_IDS or user_id == config.OWNER_ID else 0
     with _conn() as db:
         db.execute("""
-            INSERT INTO users (user_id, username, first_name)
-            VALUES (?, ?, ?)
+            INSERT INTO users (user_id, username, first_name, is_admin)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 username = excluded.username,
-                first_name = excluded.first_name
-        """, (user_id, username or "", first_name or ""))
+                first_name = excluded.first_name,
+                is_admin = CASE WHEN excluded.is_admin = 1 THEN 1 ELSE users.is_admin END
+        """, (user_id, username or "", first_name or "", admin_val))
+        db.commit()
+
+
+def is_admin(user_id: int) -> bool:
+    if user_id in config.ADMIN_IDS or user_id == config.OWNER_ID:
+        return True
+    with _conn() as db:
+        cur = db.execute("SELECT is_admin FROM users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        return bool(row and row["is_admin"])
+
+
+def set_admin(user_id: int, status: int = 1) -> None:
+    with _conn() as db:
+        db.execute("INSERT OR IGNORE INTO users (user_id, username, is_admin) VALUES (?, '', ?)", (user_id, status))
+        db.execute("UPDATE users SET is_admin = ? WHERE user_id = ?", (status, user_id))
         db.commit()
 
 
@@ -100,7 +127,6 @@ def add_or_extend_sub(user_id: int, plan: str, months: int,
     days = months * 30
 
     with _conn() as db:
-        # Проверяем, есть ли уже активная подписка на этого бота или юзера
         cur = db.execute("""
             SELECT * FROM subscriptions
             WHERE user_id = ? AND is_active = 1
@@ -109,7 +135,6 @@ def add_or_extend_sub(user_id: int, plan: str, months: int,
         row = cur.fetchone()
 
         if row:
-            # Продлеваем существующую
             cur_end = datetime.fromisoformat(row["end_date"])
             start_point = cur_end if cur_end > now else now
             new_end = start_point + timedelta(days=days)
@@ -132,7 +157,6 @@ def add_or_extend_sub(user_id: int, plan: str, months: int,
                 "bot_username": b_uname
             }
         else:
-            # Создаём новую
             new_end = now + timedelta(days=days)
             cur = db.execute("""
                 INSERT INTO subscriptions (user_id, bot_id, bot_username, bot_token, plan, start_date, end_date, is_active)
