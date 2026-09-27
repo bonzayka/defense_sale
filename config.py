@@ -34,5 +34,12 @@ DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sales.db")
 
 # Путь к родительскому проекту для авто-создания ботов через manager.py
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PARENT_DIR = os.environ.get("PARENT_DIR") or os.path.abspath(os.path.join(_CURRENT_DIR, ".."))
+_cand_dirs = [
+    os.environ.get("PARENT_DIR"),
+    os.path.abspath(os.path.join(_CURRENT_DIR, "..")),
+    r"c:\defense\lavka_defense",
+    os.path.abspath(os.path.join(_CURRENT_DIR, "..", "lavka_defense")),
+    os.path.abspath(os.path.join(_CURRENT_DIR, "..", "..", "lavka_defense")),
+]
+PARENT_DIR = next((d for d in _cand_dirs if d and os.path.exists(os.path.join(d, "manager.py"))), os.path.abspath(os.path.join(_CURRENT_DIR, "..")))
 
