@@ -9,6 +9,7 @@ import json
 import logging
 from html import escape as esc
 from aiogram import Bot
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import config
 
@@ -23,6 +24,27 @@ def make_sync_payload(event: str, data: dict) -> str:
         "data": data
     }
     return f"#SYNC#{json.dumps(payload, ensure_ascii=False)}#ENDSYNC#"
+
+
+def make_sync_keyboard(event: str) -> InlineKeyboardMarkup | None:
+    """Создает инлайн-кнопку прямого действия для администратора."""
+    if event in ("add_bot", "start_bot"):
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Запустить бота на сервере", callback_data="sync:spawn")]
+        ])
+    elif event == "update_token":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Применить токен на сервере", callback_data="sync:spawn")]
+        ])
+    elif event == "update_plan":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Применить тариф на сервере", callback_data="sync:spawn")]
+        ])
+    elif event == "stop_bot":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏹ Остановить бота на сервере", callback_data="sync:stop")]
+        ])
+    return None
 
 
 async def notify_sync_event(bot: Bot, event: str, **kwargs) -> bool:
@@ -65,10 +87,13 @@ async def notify_sync_event(bot: Bot, event: str, **kwargs) -> bool:
     )
 
     targets = set()
-    if getattr(config, "SYNC_CHAT_ID", None):
-        targets.add(config.SYNC_CHAT_ID)
+    sync_chat = getattr(config, "SYNC_CHAT_ID", None)
+    if sync_chat:
+        targets.add(sync_chat)
     if getattr(config, "OWNER_ID", None):
         targets.add(config.OWNER_ID)
+
+    keyboard = make_sync_keyboard(event)
 
     sent = False
     for chat_id in targets:
@@ -76,7 +101,8 @@ async def notify_sync_event(bot: Bot, event: str, **kwargs) -> bool:
             await bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
             sent = True
         except Exception as e:

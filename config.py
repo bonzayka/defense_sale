@@ -15,8 +15,8 @@ SUPPORT_USERNAME = "Bonzayka"
 OWNER_ID = 7116116919
 
 # ID служебного чата/канала для синхронизации с сервером защиты
-_sync_chat_raw = os.environ.get("SYNC_CHAT_ID", "")
-SYNC_CHAT_ID = int(_sync_chat_raw) if _sync_chat_raw.strip("-").isdigit() else None
+_sync_chat_raw = os.environ.get("SYNC_CHAT_ID", "-5470465111")
+SYNC_CHAT_ID = int(_sync_chat_raw) if _sync_chat_raw.strip("-").isdigit() else -5470465111
 
 # Список ID администраторов
 ADMIN_IDS = [7116116919, 1107097183] + [
